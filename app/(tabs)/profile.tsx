@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, FlatList, Alert } from 'react-native';
-import { Board, getSession, listBoardsByUser, sendMagicLink, signOut } from '@/lib/supabase';
+import { Board, getSession, listBoardsByUser, signOut, onAuthStateChange, getProfile, getUserPlaysStats, getUserCompletionsStats } from '@/lib/supabase';
 import Screen from '@/components/ui/Screen';
 import Input from '@/components/ui/Input';
 import Button from '@/components/ui/Button';
@@ -9,15 +9,31 @@ import { H1, H2, H3, Body, Caption } from '@/components/ui/Typography';
 import { colors, spacing, borderRadius } from '@/constants/Theme';
 
 export default function ProfileScreen() {
-  const [email, setEmail] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
   const [boards, setBoards] = useState<Board[]>([]);
+  const [totalPlays, setTotalPlays] = useState<number>(0);
+  const [totalCompletions, setTotalCompletions] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [sendingLink, setSendingLink] = useState(false);
 
   useEffect(() => {
     checkSession();
+    const sub = onAuthStateChange((session) => {
+      if (session?.user) {
+        setUserId(session.user.id);
+        setUserEmail(session.user.email || null);
+        loadUserBoards(session.user.id);
+        getProfile(session.user.id).then(p => setUsername(p.username)).catch(() => {});
+      } else {
+        setUserId(null);
+        setUserEmail(null);
+        setBoards([]);
+        setUsername(null);
+      }
+    });
+    return () => sub.data.subscription.unsubscribe();
   }, []);
 
   async function checkSession() {
@@ -27,6 +43,7 @@ export default function ProfileScreen() {
         setUserId(session.user.id);
         setUserEmail(session.user.email || null);
         await loadUserBoards(session.user.id);
+        try { const p = await getProfile(session.user.id); setUsername(p.username); } catch {}
       }
     } catch (error) {
       console.error('Session check failed:', error);
@@ -36,10 +53,16 @@ export default function ProfileScreen() {
   async function loadUserBoards(id: string) {
     setLoading(true);
     try {
-      const data = await listBoardsByUser(id);
-      setBoards(data);
+      const [boardsData, playsStats, completionsStats] = await Promise.all([
+        listBoardsByUser(id),
+        getUserPlaysStats(id).catch(() => ({ total_plays: 0 })),
+        getUserCompletionsStats(id).catch(() => ({ total_completions: 0 }))
+      ]);
+      setBoards(boardsData);
+      setTotalPlays(playsStats.total_plays);
+      setTotalCompletions(completionsStats.total_completions);
     } catch (error) {
-      console.error('Failed to load user boards:', error);
+      console.error('Failed to load user data:', error);
     } finally {
       setLoading(false);
     }
@@ -82,50 +105,16 @@ export default function ProfileScreen() {
   if (!userId) {
     return (
       <Screen gradient>
-        <View style={{ 
-          marginBottom: spacing[6], 
-          paddingTop: spacing[6],
-          alignItems: 'center' 
-        }}>
-          <H1 style={{ textAlign: 'center', marginBottom: spacing[2] }}>
-            Welcome! 👋
-          </H1>
-          <Body color={colors.text.secondary} style={{ textAlign: 'center' }}>
-            Sign in to save your puzzles and track your progress
+        <View style={{ padding: spacing[5], paddingTop: spacing[8], alignItems: 'center' }}>
+          <H1 style={{ textAlign: 'center', marginBottom: spacing[3] }}>Account</H1>
+          <Body color={colors.text.secondary} style={{ textAlign: 'center', marginBottom: spacing[5] }}>
+            Please sign in to view your profile and stats.
           </Body>
+          <View style={{ flexDirection: 'row', gap: spacing[3] }}>
+            <Button title="Sign In" onPress={() => (require('expo-router').router.push('/auth/sign-in'))} size="lg" />
+            <Button title="Sign Up" onPress={() => (require('expo-router').router.push('/auth/sign-up'))} size="lg" variant="outline" />
+          </View>
         </View>
-
-        <Card padding={5}>
-          <H2 style={{ marginBottom: spacing[4] }}>Sign In</H2>
-          
-          <Input
-            label="Email Address"
-            placeholder="you@example.com"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          
-          <Button
-            title={sendingLink ? "Sending..." : "Send Magic Link"}
-            onPress={handleSendMagicLink}
-            loading={sendingLink}
-            disabled={!email.trim()}
-            size="lg"
-            style={{ marginTop: spacing[4] }}
-          />
-          
-          <Body color={colors.text.tertiary} style={{ 
-            textAlign: 'center', 
-            marginTop: spacing[4],
-            lineHeight: 20,
-          }}>
-            We'll send you a secure link to sign in without a password. 
-            No account needed - we'll create one for you!
-          </Body>
-        </Card>
       </Screen>
     );
   }
@@ -140,10 +129,8 @@ export default function ProfileScreen() {
       <View style={{ padding: spacing[4], paddingTop: spacing[6] }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <View style={{ flex: 1 }}>
-            <H1 style={{ marginBottom: spacing[1] }}>Profile</H1>
-            <Body color={colors.text.secondary}>
-              {userEmail || 'Signed in'}
-            </Body>
+            <H1 style={{ marginBottom: spacing[1] }}>{username ?? 'Profile'}</H1>
+            <Body color={colors.text.secondary}>{userEmail || 'Signed in'}</Body>
           </View>
           <Button
             title="Sign Out"
@@ -163,10 +150,12 @@ export default function ProfileScreen() {
               <Caption color={colors.text.secondary}>Puzzles Created</Caption>
             </View>
             <View style={{ alignItems: 'center' }}>
-              <H2 color={colors.primary[600]}>
-                {boards.reduce((sum, board) => sum + board.completions_count, 0)}
-              </H2>
+              <H2 color={colors.primary[600]}>{totalPlays}</H2>
               <Caption color={colors.text.secondary}>Total Plays</Caption>
+            </View>
+            <View style={{ alignItems: 'center' }}>
+              <H2 color={colors.primary[600]}>{totalCompletions}</H2>
+              <Caption color={colors.text.secondary}>Completed</Caption>
             </View>
           </View>
         </Card>

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { Tabs } from 'expo-router';
+import { Tabs, useRouter } from 'expo-router';
 import { colors } from '@/constants/Theme';
+import { getSession } from '@/lib/supabase';
 
 // You can explore the built-in icon families and icons on the web at https://icons.expo.fyi/
 function TabBarIcon(props: {
@@ -12,6 +13,15 @@ function TabBarIcon(props: {
 }
 
 export default function TabLayout() {
+  const router = useRouter();
+  const [authed, setAuthed] = useState<boolean | null>(null);
+  useEffect(() => {
+    (async () => {
+      const s = await getSession();
+      setAuthed(!!s?.user);
+    })();
+  }, []);
+
   return (
     <Tabs
       screenOptions={{

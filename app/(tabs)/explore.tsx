@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FlatList, View, Pressable, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Board, listBoards } from '@/lib/supabase';
+import { Board, listBoards, getSession } from '@/lib/supabase';
 import Screen from '@/components/ui/Screen';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -30,7 +30,12 @@ export default function ExploreScreen() {
   }, []);
 
   const renderBoard = ({ item }: { item: Board }) => (
-    <BoardCard board={item} onPlay={() => {
+    <BoardCard board={item} onPlay={async () => {
+      const s = await getSession();
+      if (!s?.user) {
+        router.push('/auth/sign-in');
+        return;
+      }
       router.push(`/game/${item.slug}` as any);
     }} />
   );

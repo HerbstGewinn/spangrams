@@ -21,9 +21,15 @@ export default function PlayableGrid({ gameState, onGameStateChange }: PlayableG
   const [tapMode, setTapMode] = useState(true); // New: tap mode vs drag mode
   const gridRef = useRef<View>(null);
   const [gridLayout, setGridLayout] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  // Keep the latest game state in a ref to prevent stale closures between rapid taps
+  const latestStateRef = useRef<GameState>(gameState);
+  useEffect(() => {
+    latestStateRef.current = gameState;
+  }, [gameState]);
 
 
   const getCellFromPosition = (x: number, y: number): GameCell | null => {
+    console.log(`[grid] getCellFromPosition page=(${x},${y}) layout=(${gridLayout.x},${gridLayout.y},${gridLayout.width},${gridLayout.height})`);
     // Adjust coordinates relative to grid container
     const relativeX = x - gridLayout.x;
     const relativeY = y - gridLayout.y;
@@ -32,8 +38,10 @@ export default function PlayableGrid({ gameState, onGameStateChange }: PlayableG
     const row = Math.floor(relativeY / TOTAL_CELL_SIZE);
     
     if (row >= 0 && row < gameState.grid.length && col >= 0 && col < gameState.grid[0].length) {
+      console.log(`[grid] mapped to row=${row} col=${col}`);
       return gameState.grid[row][col];
     }
+    console.log(`[grid] position out of bounds row=${row} col=${col}`);
     return null;
   };
 
@@ -69,26 +77,33 @@ export default function PlayableGrid({ gameState, onGameStateChange }: PlayableG
 
   // Handle tap on cell - SIMPLE AND CONFIDENT
   const handleCellTap = (cell: GameCell) => {
-    if (gameState.currentPath.length === 0) {
+    const t0 = Date.now();
+    console.log(`[tap] cell=(${cell.row},${cell.col}) letter=${cell.letter} pathLen=${latestStateRef.current.currentPath.length}`);
+    const state = latestStateRef.current;
+    if (state.currentPath.length === 0) {
       // Step 1: Start new path
-      const newState = updateGameState(gameState, { type: 'START_TRACE', cell });
+      const newState = updateGameState(state, { type: 'START_TRACE', cell });
       onGameStateChange(newState);
+      latestStateRef.current = newState;
+      console.log(`[tap] START_TRACE -> len=${newState.currentPath.length} dt=${Date.now()-t0}ms`);
     } else {
-      const lastCell = gameState.currentPath[gameState.currentPath.length - 1];
+      const lastCell = state.currentPath[state.currentPath.length - 1];
       
       // Check if tapped cell is already in the path (backtrack)
-      const isAlreadyInPath = gameState.currentPath.some(
+      const isAlreadyInPath = state.currentPath.some(
         pathCell => pathCell.row === cell.row && pathCell.col === cell.col
       );
       
       if (isAlreadyInPath) {
         // Step 2: Backtrack to tapped cell
-        const cellIndex = gameState.currentPath.findIndex(
+        const cellIndex = state.currentPath.findIndex(
           pathCell => pathCell.row === cell.row && pathCell.col === cell.col
         );
-        const newPath = gameState.currentPath.slice(0, cellIndex + 1);
-        const newState = { ...gameState, currentPath: newPath };
+        const newPath = state.currentPath.slice(0, cellIndex + 1);
+        const newState = { ...state, currentPath: newPath };
         onGameStateChange(newState);
+        latestStateRef.current = newState;
+        console.log(`[tap] BACKTRACK -> len=${newState.currentPath.length} idx=${cellIndex} dt=${Date.now()-t0}ms`);
         return;
       }
       
@@ -96,69 +111,115 @@ export default function PlayableGrid({ gameState, onGameStateChange }: PlayableG
       const rowDiff = Math.abs(cell.row - lastCell.row);
       const colDiff = Math.abs(cell.col - lastCell.col);
       const isAdjacent = rowDiff <= 1 && colDiff <= 1 && (rowDiff > 0 || colDiff > 0);
+      console.log(`[tap] last=(${lastCell.row},${lastCell.col}) d=(${rowDiff},${colDiff}) adjacent=${isAdjacent}`);
       
       if (isAdjacent) {
         // Step 3: Add to path
-        const newState = updateGameState(gameState, { type: 'ADD_TO_PATH', cell });
+        const newState = updateGameState(state, { type: 'ADD_TO_PATH', cell });
         onGameStateChange(newState);
+        latestStateRef.current = newState;
+        console.log(`[tap] ADD_TO_PATH -> len=${newState.currentPath.length} dt=${Date.now()-t0}ms`);
       } else {
         // Step 4: Start new path from this cell
-        const clearedState = updateGameState(gameState, { type: 'CLEAR_PATH' });
+        const clearedState = updateGameState(state, { type: 'CLEAR_PATH' });
         const newState = updateGameState(clearedState, { type: 'START_TRACE', cell });
         onGameStateChange(newState);
+        latestStateRef.current = newState;
+        console.log(`[tap] CLEAR+START from non-adjacent -> len=${newState.currentPath.length} dt=${Date.now()-t0}ms`);
       }
     }
   };
 
   // Handle end of word (double tap or special action)
   const handleEndTrace = () => {
-    onGameStateChange(updateGameState(gameState, { type: 'END_TRACE' }));
+    const state = latestStateRef.current;
+    const newState = updateGameState(state, { type: 'END_TRACE' });
+    latestStateRef.current = newState;
+    onGameStateChange(newState);
   };
 
   const panResponder = PanResponder.create({
-    onStartShouldSetPanResponder: () => !tapMode, // Only intercept if not in tap mode
-    onMoveShouldSetPanResponder: () => !tapMode,
-    onStartShouldSetPanResponderCapture: () => !tapMode,
-    onMoveShouldSetPanResponderCapture: () => !tapMode,
-    onShouldBlockNativeResponder: () => !tapMode,
+    onStartShouldSetPanResponder: () => {
+      const val = !tapMode;
+      console.log(`[pan] onStartShouldSetPanResponder -> ${val}`);
+      return val;
+    }, // Only intercept if not in tap mode
+    onMoveShouldSetPanResponder: () => {
+      const val = !tapMode;
+      console.log(`[pan] onMoveShouldSetPanResponder -> ${val}`);
+      return val;
+    },
+    onStartShouldSetPanResponderCapture: () => {
+      const val = !tapMode;
+      console.log(`[pan] onStartShouldSetPanResponderCapture -> ${val}`);
+      return val;
+    },
+    onMoveShouldSetPanResponderCapture: () => {
+      const val = !tapMode;
+      console.log(`[pan] onMoveShouldSetPanResponderCapture -> ${val}`);
+      return val;
+    },
+    onShouldBlockNativeResponder: () => {
+      const val = !tapMode;
+      console.log(`[pan] onShouldBlockNativeResponder -> ${val}`);
+      return val;
+    },
 
     onPanResponderGrant: (evt) => {
-      if (tapMode) return;
+      if (tapMode) { console.log('[pan] grant ignored (tapMode)'); return; }
       setTouching(true);
       const { pageX, pageY } = evt.nativeEvent;
+      console.log(`[pan] grant at ${pageX},${pageY}`);
       const cell = getCellFromPosition(pageX, pageY);
       
       if (cell) {
-        onGameStateChange(updateGameState(gameState, { type: 'START_TRACE', cell }));
+        const state = latestStateRef.current;
+        const newState = updateGameState(state, { type: 'START_TRACE', cell });
+        latestStateRef.current = newState;
+        onGameStateChange(newState);
+        console.log(`[pan] START_TRACE at (${cell.row},${cell.col})`);
       }
     },
 
     onPanResponderMove: (evt) => {
-      if (tapMode || !touching) return;
+      if (tapMode || !touching) { if (tapMode) console.log('[pan] move ignored (tapMode)'); return; }
       
       const { pageX, pageY } = evt.nativeEvent;
+      console.log(`[pan] move at ${pageX},${pageY}`);
       const cell = getCellFromPosition(pageX, pageY);
       
       if (cell) {
-        const lastCell = gameState.currentPath[gameState.currentPath.length - 1];
+        const state = latestStateRef.current;
+        const lastCell = state.currentPath[state.currentPath.length - 1];
         if (!lastCell || (cell.row !== lastCell.row || cell.col !== lastCell.col)) {
-          onGameStateChange(updateGameState(gameState, { type: 'ADD_TO_PATH', cell }));
+          const newState = updateGameState(state, { type: 'ADD_TO_PATH', cell });
+          latestStateRef.current = newState;
+          onGameStateChange(newState);
+          console.log(`[pan] ADD_TO_PATH at (${cell.row},${cell.col}) -> len=${newState.currentPath.length}`);
         }
       }
     },
 
     onPanResponderRelease: () => {
-      if (tapMode) return;
+      if (tapMode) { console.log('[pan] release ignored (tapMode)'); return; }
       setTouching(false);
       handleEndTrace();
     },
 
     onPanResponderTerminate: () => {
-      if (tapMode) return;
+      if (tapMode) { console.log('[pan] terminate ignored (tapMode)'); return; }
       setTouching(false);
-      onGameStateChange(updateGameState(gameState, { type: 'CLEAR_PATH' }));
+      const state = latestStateRef.current;
+      const newState = updateGameState(state, { type: 'CLEAR_PATH' });
+      latestStateRef.current = newState;
+      onGameStateChange(newState);
     },
   });
+
+  // Reset transient flags when a new game state arrives (e.g., after Restart)
+  useEffect(() => {
+    setTouching(false);
+  }, [gameState.grid, gameState.words]);
 
   const getCellState = (cell: GameCell) => {
     const isInCurrentPath = gameState.currentPath.some(
@@ -190,30 +251,35 @@ export default function PlayableGrid({ gameState, onGameStateChange }: PlayableG
     <View style={{ position: 'relative' }}>
       {/* Connection Lines Overlay - REACTIVE TO GAME STATE */}
       {gameState.currentPath.length > 1 && (
-        <Svg
+        <View
+          pointerEvents="none"
           style={{
             position: 'absolute',
             top: spacing[3],
             left: spacing[3],
             width: WIDTH * TOTAL_CELL_SIZE,
             height: HEIGHT * TOTAL_CELL_SIZE,
-            zIndex: 10,
+            zIndex: 0,
           }}
         >
-          {buildConnectionLines().map((line, index) => (
-            <Line
-              key={index}
-              x1={line.from.x}
-              y1={line.from.y}
-              x2={line.to.x}
-              y2={line.to.y}
-              stroke={colors.primary[500]}
-              strokeWidth={4}
-              strokeLinecap="round"
-              opacity={0.9}
-            />
-          ))}
-        </Svg>
+          <Svg
+            style={{ width: '100%', height: '100%' }}
+          >
+            {buildConnectionLines().map((line, index) => (
+              <Line
+                key={index}
+                x1={line.from.x}
+                y1={line.from.y}
+                x2={line.to.x}
+                y2={line.to.y}
+                stroke={colors.primary[500]}
+                strokeWidth={4}
+                strokeLinecap="round"
+                opacity={0.9}
+              />
+            ))}
+          </Svg>
+        </View>
       )}
 
       {/* Game Grid */}
@@ -224,6 +290,7 @@ export default function PlayableGrid({ gameState, onGameStateChange }: PlayableG
           borderRadius: borderRadius.xl,
           padding: spacing[3],
           alignSelf: 'center',
+          zIndex: 1,
         }}
         onLayout={(event) => {
           event.target.measure((x, y, width, height, pageX, pageY) => {

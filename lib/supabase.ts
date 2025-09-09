@@ -31,6 +31,75 @@ export function getSupabase(): SupabaseClient | null {
 
 export const supabase = getSupabase();
 
+// Auth helpers
+export async function signUpWithEmail(params: { email: string; password: string; username: string }) {
+    const sb = getSupabase();
+    if (!sb) throw new Error('Supabase is not configured');
+    const { email, password, username } = params;
+    const { data, error } = await sb.auth.signUp({
+        email,
+        password,
+        options: {
+            data: { username },
+        },
+    });
+    if (error) throw error;
+    return data;
+}
+
+export async function signInWithEmail(params: { email: string; password: string }) {
+    const sb = getSupabase();
+    if (!sb) throw new Error('Supabase is not configured');
+    const { email, password } = params;
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    return data;
+}
+
+export async function getProfile(userId: string) {
+    const sb = getSupabase();
+    if (!sb) throw new Error('Supabase is not configured');
+    const { data, error } = await sb
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+    if (error) throw error;
+    return data as { id: string; username: string; avatar_url: string | null; created_at: string };
+}
+
+export function onAuthStateChange(callback: (session: any) => void) {
+    const sb = getSupabase();
+    if (!sb) return { data: { subscription: { unsubscribe() {} } } } as any;
+    return sb.auth.onAuthStateChange(async (_event, session) => {
+        callback(session);
+    });
+}
+
+export async function getUserPlaysStats(userId: string) {
+    const sb = getSupabase();
+    if (!sb) throw new Error('Supabase is not configured');
+    const { data, error } = await sb
+        .from('user_plays_stats')
+        .select('total_plays')
+        .eq('user_id', userId)
+        .single();
+    if (error) throw error;
+    return data as { total_plays: number };
+}
+
+export async function getUserCompletionsStats(userId: string) {
+    const sb = getSupabase();
+    if (!sb) throw new Error('Supabase is not configured');
+    const { data, error } = await sb
+        .from('user_completions_stats')
+        .select('total_completions')
+        .eq('user_id', userId)
+        .single();
+    if (error) throw error;
+    return data as { total_completions: number };
+}
+
 export async function generateBoardRemote(payload: { title: string; theme: string; author: string; words: string[] }) {
 	const { url, anon } = getEnv();
 	if (!url || !anon) throw new Error('Supabase is not configured');

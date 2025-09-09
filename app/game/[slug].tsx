@@ -46,8 +46,9 @@ export default function GameScreen() {
       });
       setGameState(initialGameState);
       
-      // Record that someone started playing
-      recordPlay();
+      // Record that someone started playing (after boardData is set)
+      console.log('About to record play for board:', data.id);
+      await recordPlay(data.id);
     } catch (error: any) {
       Alert.alert('Error', 'Failed to load board: ' + error.message);
       router.back();
@@ -90,7 +91,7 @@ export default function GameScreen() {
       // Insert completion record
       await supabase.from('completions').insert({
         board_id: boardData.id,
-        took_ms: Date.now(), // TODO: Track actual time
+        took_ms: 0,
         word_count: gameState?.foundWords.size || 0,
       });
       
@@ -112,26 +113,33 @@ export default function GameScreen() {
     }
   }
 
-  async function recordPlay() {
-    if (!boardData || !supabase) return;
+  async function recordPlay(boardId?: string) {
+    const id = boardId || boardData?.id;
+    if (!id || !supabase) {
+      console.log('recordPlay skipped - no boardId or supabase:', { id, supabase: !!supabase });
+      return;
+    }
     
     try {
-      console.log('Recording play for board:', boardData.id);
+      console.log('Recording play for board:', id);
+      // Insert a play row (user_id filled by trigger if signed in)
+      const { data: playData, error: playError } = await supabase
+        .from('plays')
+        .insert({ board_id: id })
+        .select();
       
-      // Increment play count when game starts
-      const { error } = await supabase.rpc('increment_board_plays', {
-        board_id: boardData.id
-      });
-      
-      if (error) {
-        console.error('RPC failed, using fallback:', error);
-        // Fallback to manual increment
-        await supabase
-          .from('boards')
-          .update({ plays_count: (boardData.plays_count || 0) + 1 })
-          .eq('id', boardData.id);
+      if (playError) {
+        console.error('Failed to insert play:', playError);
       } else {
-        console.log('Play count incremented successfully');
+        console.log('Play inserted successfully:', playData);
+      }
+      
+      // Increment aggregated counter as well
+      const { error: rpcError } = await supabase.rpc('increment_board_plays', { board_id: id });
+      if (rpcError) {
+        console.error('RPC plays increment failed:', rpcError);
+      } else {
+        console.log('RPC plays increment successful');
       }
     } catch (error) {
       console.error('Failed to record play:', error);

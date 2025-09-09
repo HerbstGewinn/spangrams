@@ -74,25 +74,33 @@ export function validateWord(path: GameCell[], validWords: string[]): {
   word: string;
   isSpangram: boolean;
 } {
-  const word = pathToWord(path);
+  const word = pathToWord(path).trim();
   const reversedWord = word.split('').reverse().join('');
+  // Case-insensitive validation with trim, but return the original-cased dictionary word
+  const normalizedWords = validWords.map(w => w.trim().toLowerCase());
+  const wordLower = word.toLowerCase();
+  const reversedLower = reversedWord.toLowerCase();
   
-  const forwardValid = validWords.includes(word);
-  const backwardValid = validWords.includes(reversedWord);
+  const forwardValid = normalizedWords.includes(wordLower);
+  const backwardValid = normalizedWords.includes(reversedLower);
   
   if (forwardValid) {
+    const idx = normalizedWords.findIndex(w => w === wordLower);
+    const dictWord = idx >= 0 ? validWords[idx] : word;
     return {
       isValid: true,
-      word,
-      isSpangram: path.every(cell => cell.isSpangram) || word === validWords[0],
+      word: dictWord,
+      isSpangram: path.every(cell => cell.isSpangram) || idx === 0,
     };
   }
   
   if (backwardValid) {
+    const idx = normalizedWords.findIndex(w => w === reversedLower);
+    const dictWord = idx >= 0 ? validWords[idx] : reversedWord;
     return {
       isValid: true,
-      word: reversedWord,
-      isSpangram: path.every(cell => cell.isSpangram) || reversedWord === validWords[0],
+      word: dictWord,
+      isSpangram: path.every(cell => cell.isSpangram) || idx === 0,
     };
   }
   
@@ -138,6 +146,7 @@ export function updateGameState(
 ): GameState {
   switch (action.type) {
     case 'START_TRACE':
+      console.log(`[logic] START_TRACE at (${action.cell.row},${action.cell.col})`);
       return {
         ...state,
         currentPath: [action.cell],
@@ -145,23 +154,26 @@ export function updateGameState(
       };
       
     case 'ADD_TO_PATH':
+      console.log(`[logic] ADD_TO_PATH try (${action.cell.row},${action.cell.col}) from len=${state.currentPath.length})`);
       // Check if cell is already in path (prevent duplicates)
       const isDuplicate = state.currentPath.some(
         pathCell => pathCell.row === action.cell.row && pathCell.col === action.cell.col
       );
       
       if (isDuplicate) {
+        console.log('[logic] duplicate, ignored');
         return state;
       }
       
       // Check adjacency to last cell only (not full path validation)
       const lastCell = state.currentPath[state.currentPath.length - 1];
       if (lastCell && !isAdjacent(lastCell, action.cell)) {
+        console.log(`[logic] not adjacent to last (${lastCell.row},${lastCell.col}), ignored`);
         return state;
       }
       
       const newPath = [...state.currentPath, action.cell];
-      
+      console.log(`[logic] ADD_TO_PATH ok -> len=${newPath.length}`);
       return {
         ...state,
         currentPath: newPath,
@@ -169,6 +181,7 @@ export function updateGameState(
       
     case 'END_TRACE':
       if (state.currentPath.length < 2) {
+        console.log('[logic] END_TRACE too short -> clear');
         return {
           ...state,
           currentPath: [],
@@ -177,6 +190,7 @@ export function updateGameState(
       }
       
       const validation = validateWord(state.currentPath, state.words);
+      console.log(`[logic] END_TRACE validate word=${validation.word} valid=${validation.isValid}`);
       
       if (validation.isValid && !state.foundWords.has(validation.word)) {
         const newFoundWords = new Set([...state.foundWords, validation.word]);

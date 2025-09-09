@@ -41,7 +41,10 @@ export default function GameCellComponent({
 
   return (
     <CellContainer
-      onPress={onTap}
+      onPress={() => { console.log(`[cell] press (${cell.row},${cell.col})`); onTap?.(); }}
+      onPressIn={() => console.log(`[cell] pressIn (${cell.row},${cell.col})`)}
+      onPressOut={() => console.log(`[cell] pressOut (${cell.row},${cell.col})`)}
+      onLongPress={() => console.log(`[cell] longPress (${cell.row},${cell.col})`)}
       style={{
         width: size,
         height: size,
